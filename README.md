@@ -67,6 +67,18 @@ npm test
 3. Push to `main`. The workflow runs the tests, builds, and deploys.
 4. In Supabase **Authentication → URL Configuration**, add your Pages URL as Site URL.
 
+## iOS app (Capacitor)
+
+The same code ships as a native iOS app with haptics, the native share sheet, story images and daily streak reminders.
+
+```bash
+npm run ios:sync    # pulls public config from GitHub variables, builds, syncs ios/
+npm run ios:open    # opens Xcode → pick your Team in Signing, then Product → Archive
+npm run app-icons   # regenerate the app icon and splash (needs ffmpeg)
+```
+
+App Store requirements already covered: in-app account deletion, [privacy policy](public/privacy.html), username filter, report and block. Turnstile runs through the `captcha.html` bridge on the public site, because Cloudflare doesn't accept the `capacitor://` origin.
+
 ## How it works
 
 ```
