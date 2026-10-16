@@ -1,0 +1,23 @@
+{
+  "name": "innerclock",
+  "version": "0.1.0",
+  "description": "The daily social game that tests your inner clock.",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "vite": "^8.3.4"
+  }
+}
