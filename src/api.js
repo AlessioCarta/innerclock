@@ -12,11 +12,44 @@ function check({ data, error }) {
   return data;
 }
 
+const turnstileKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+
+/**
+ * Cloudflare Turnstile token for Supabase's CAPTCHA protection, or undefined
+ * when no site key is configured. Invisible unless Cloudflare wants a click.
+ */
+export function captchaToken() {
+  if (!turnstileKey) return Promise.resolve(undefined);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.onerror = () => reject(new Error("CAPTCHA unavailable"));
+    script.onload = () => {
+      const box = document.createElement("div");
+      box.className = "captcha";
+      document.body.append(box);
+      const done = (fn) => (arg) => {
+        box.remove();
+        fn(arg);
+      };
+      window.turnstile.render(box, {
+        sitekey: turnstileKey,
+        appearance: "interaction-only",
+        callback: done(resolve),
+        "error-callback": done(() => reject(new Error("CAPTCHA failed"))),
+      });
+    };
+    document.head.append(script);
+  });
+}
+
 /** Signed-in user, creating an anonymous one on first visit. */
 export async function ensureUser() {
   const { data } = await sb.auth.getSession();
   if (data.session) return data.session.user;
-  return check(await sb.auth.signInAnonymously()).user;
+  const token = await captchaToken();
+  return check(await sb.auth.signInAnonymously({ options: { captchaToken: token } })).user;
 }
 
 export async function getProfile(id) {
