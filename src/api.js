@@ -1,6 +1,7 @@
 // Thin wrapper over Supabase. When env vars are missing the app runs in
 // guest mode (solo play + share), and every function here is unused.
 import { createClient } from "@supabase/supabase-js";
+import { isNative, PUBLIC_URL } from "./native.js";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -20,6 +21,7 @@ const turnstileKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
  */
 export function captchaToken() {
   if (!turnstileKey) return Promise.resolve(undefined);
+  if (isNative) return nativeCaptchaToken();
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
@@ -44,6 +46,41 @@ export function captchaToken() {
   });
 }
 
+/**
+ * In the app, Turnstile can't run on capacitor://localhost, so we embed the
+ * public site's captcha.html bridge and wait for its postMessage.
+ */
+function nativeCaptchaToken() {
+  const origin = new URL(PUBLIC_URL).origin;
+  return new Promise((resolve, reject) => {
+    const frame = document.createElement("iframe");
+    frame.src = `${PUBLIC_URL}captcha.html`;
+    frame.className = "captcha-frame";
+    frame.title = "Security check";
+    const done = () => {
+      clearTimeout(timer);
+      removeEventListener("message", onMessage);
+      frame.remove();
+    };
+    const onMessage = (e) => {
+      if (e.origin !== origin || e.data?.source !== "innerclock-captcha") return;
+      if (e.data.interactive) {
+        frame.classList.add("show"); // Cloudflare wants a tap
+        return;
+      }
+      done();
+      if (e.data.token) resolve(e.data.token);
+      else reject(new Error(`CAPTCHA failed (${e.data.error})`));
+    };
+    const timer = setTimeout(() => {
+      done();
+      reject(new Error("CAPTCHA timeout"));
+    }, 30000);
+    addEventListener("message", onMessage);
+    document.body.append(frame);
+  });
+}
+
 /** Signed-in user, creating an anonymous one on first visit. */
 export async function ensureUser() {
   const { data } = await sb.auth.getSession();
@@ -60,6 +97,7 @@ export async function getProfile(id) {
 export async function createProfile(id, username) {
   const res = await sb.from("profiles").insert({ id, username }).select("id, username").single();
   if (res.error?.code === "23505") throw Object.assign(new Error("Username taken"), { code: "taken" });
+  if (res.error?.code === "23514") throw Object.assign(new Error("Username not allowed"), { code: "not-allowed" });
   return check(res);
 }
 
@@ -150,6 +188,25 @@ export function subscribeDay(day, onChange) {
   };
 }
 
+export async function blockedIds(userId) {
+  return check(await sb.from("blocks").select("blocked").eq("blocker", userId)).map((r) => r.blocked);
+}
+
+/** Hide a player from your leaderboards (and stop following them). */
+export async function block(id) {
+  const res = await sb.from("blocks").insert({ blocked: id });
+  if (res.error && res.error.code !== "23505") throw res.error;
+  await sb.from("follows").delete().eq("followee", id);
+}
+
+export async function unblock(id) {
+  check(await sb.from("blocks").delete().eq("blocked", id));
+}
+
+export async function report(id, reason) {
+  check(await sb.from("reports").insert({ reported: id, reason }));
+}
+
 /** Anonymous analytics counter (no user id stored). Never throws. */
 export async function logEvent(day, kind) {
   try {
@@ -157,6 +214,12 @@ export async function logEvent(day, kind) {
   } catch {
     /* analytics must never break the game */
   }
+}
+
+/** Permanently deletes the signed-in account and all its data, then signs out. */
+export async function deleteAccount() {
+  check(await sb.rpc("delete_my_account"));
+  await sb.auth.signOut();
 }
 
 /** Upgrade an anonymous account so it survives across devices (magic link). */

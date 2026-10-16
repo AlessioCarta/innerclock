@@ -54,11 +54,11 @@ export function errorPct(target, actual) {
 }
 
 export const TIERS = [
-  { max: 0.02, emoji: "🟪", label: "Atomic" },
-  { max: 0.05, emoji: "🟩", label: "Sharp" },
-  { max: 0.1, emoji: "🟨", label: "Close" },
-  { max: 0.2, emoji: "🟧", label: "Drifting" },
-  { max: Infinity, emoji: "🟥", label: "Lost in time" },
+  { max: 0.02, emoji: "🟪", label: "Atomic", color: "#a855f7" },
+  { max: 0.05, emoji: "🟩", label: "Sharp", color: "#22c55e" },
+  { max: 0.1, emoji: "🟨", label: "Close", color: "#eab308" },
+  { max: 0.2, emoji: "🟧", label: "Drifting", color: "#f97316" },
+  { max: Infinity, emoji: "🟥", label: "Lost in time", color: "#ef4444" },
 ];
 
 export function tierFor(err) {

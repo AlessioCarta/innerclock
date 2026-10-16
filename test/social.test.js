@@ -44,6 +44,8 @@ before(async () => {
   await db.exec(await migration("20261016000001_game_functions.sql"));
   await db.exec(await migration("20261016000002_social.sql"));
   await db.exec(await migration("20261016000003_analytics.sql"));
+  await db.exec(await migration("20261016000004_delete_account.sql"));
+  await db.exec(await migration("20261016000005_moderation.sql"));
   await db.exec(`insert into auth.users values ('${A}'), ('${B}');`);
   today = (await q("select public.ic_utc_day() d"))[0].d;
   await as(A, () => q("insert into profiles (id, username) values ($1, 'alice')", [A]));
@@ -180,4 +182,45 @@ test("cannot follow or react as someone else", async () => {
     as(A, () => q("insert into follows (follower, followee) values ($1, $2)", [B, A])),
     /row-level security/,
   );
+});
+
+test("delete my account removes only my data", async () => {
+  const D = "00000000-0000-0000-0000-00000000000d";
+  await q("insert into auth.users values ($1)", [D]);
+  await as(D, () => q("insert into profiles (id, username) values ($1, 'dora')", [D]));
+  await as(D, () => q("insert into results (day, actuals) values ($1, '{1,2,3,4,5}')", [today]));
+  await as(D, () => q("insert into follows (followee) values ($1)", [A]));
+  await as(D, () => q("select public.delete_my_account()"));
+  for (const [table, col] of [["auth.users", "id"], ["profiles", "id"], ["results", "user_id"], ["follows", "follower"]]) {
+    assert.equal((await q(`select 1 from ${table} where ${col} = $1`, [D])).length, 0, table);
+  }
+  assert.equal((await q("select 1 from profiles where id = $1", [A])).length, 1, "others untouched");
+  await db.exec("set role anon;");
+  await assert.rejects(q("select public.delete_my_account()"), /permission denied/);
+  await db.exec("reset role;");
+});
+
+test("moderation: offensive and reserved usernames are rejected", async () => {
+  const E = "00000000-0000-0000-0000-00000000000e";
+  await q("insert into auth.users values ($1)", [E]);
+  for (const bad of ["xx_fuck_xx", "stronzo99", "admin"]) {
+    await assert.rejects(as(E, () => q("insert into profiles (id, username) values ($1, $2)", [E, bad])), /username_allowed/);
+  }
+  await as(E, () => q("insert into profiles (id, username) values ($1, 'evelyn')", [E]));
+});
+
+test("moderation: block hides a player, report is write-only", async () => {
+  const before = await as(B, () => q("select username from leaderboard($1)", [today]));
+  assert.ok(before.some((r) => r.username === "alice"));
+  await as(B, () => q("insert into blocks (blocked) values ($1)", [A]));
+  const after = await as(B, () => q("select username from leaderboard($1)", [today]));
+  assert.ok(!after.some((r) => r.username === "alice"), "blocked player hidden");
+  assert.ok((await as(A, () => q("select username from leaderboard($1)", [today]))).some((r) => r.username === "bob"), "only for the blocker");
+  assert.equal((await as(A, () => q("select * from blocks"))).length, 0, "blocks are private");
+
+  await as(B, () => q("insert into reports (reported, reason) values ($1, 'offensive username')", [A]));
+  await assert.rejects(as(B, () => q("select * from reports")), /permission denied/);
+  await assert.rejects(as(B, () => q("insert into reports (reporter, reported) values ($1, $2)", [A, B])), /row-level security/);
+  const [row] = await q("select username, reports from moderation_queue");
+  assert.deepEqual([row.username, Number(row.reports)], ["alice", 1]);
 });

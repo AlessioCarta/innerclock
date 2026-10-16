@@ -1,0 +1,15 @@
+{
+  "appId": "com.alessiocarta.innerclock",
+  "appName": "InnerClock",
+  "webDir": "dist",
+  "backgroundColor": "#0b0a12",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0b0a12"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#a78bfa"
+    }
+  }
+}

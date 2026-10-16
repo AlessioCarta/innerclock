@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  Turnstile bridge for the native app. Cloudflare only accepts real web origins,
+  so the app (capacitor://localhost) embeds this page from the public site and
+  receives the token via postMessage. Tokens are only ever sent to the app origin.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>InnerClock security check</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        display: grid;
+        place-items: center;
+        min-height: 100%;
+      }
+    </style>
+    <script>
+      const APP_ORIGINS = ["capacitor://localhost", "ionic://localhost"];
+      function send(msg) {
+        for (const origin of APP_ORIGINS) {
+          try {
+            parent.postMessage({ source: "innerclock-captcha", ...msg }, origin);
+          } catch {
+            /* origin mismatch is silently dropped by the browser */
+          }
+        }
+      }
+      window.onTurnstileLoad = () => {
+        turnstile.render("#widget", {
+          sitekey: "%VITE_TURNSTILE_SITE_KEY%",
+          appearance: "interaction-only",
+          callback: (token) => send({ token }),
+          "error-callback": (code) => send({ error: String(code) }),
+          "before-interactive-callback": () => send({ interactive: true }),
+        });
+      };
+    </script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async defer></script>
+  </head>
+  <body>
+    <div id="widget"></div>
+  </body>
+</html>

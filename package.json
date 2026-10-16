@@ -10,14 +10,24 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "og": "node scripts/og.mjs"
+    "og": "node scripts/og.mjs",
+    "ios:sync": "sh scripts/env-from-github.sh && vite build && cap sync ios",
+    "ios:open": "cap open ios",
+    "app-icons": "node scripts/app-icons.mjs"
   },
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/share": "^8.0.3",
     "@supabase/supabase-js": "^2.118.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@electric-sql/pglite": "^0.5.10",
     "@resvg/resvg-js": "^2.6.2",
     "vite": "^8.3.4"

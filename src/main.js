@@ -1,5 +1,7 @@
 import "./style.css";
 import * as api from "./api.js";
+import { storyImage } from "./story.js";
+import * as native from "./native.js";
 import {
   ROUNDS,
   TIERS,
@@ -41,6 +43,7 @@ const S = {
   boardTab: "global",
   rank: null,
   following: [],
+  blocked: [], // user ids you've blocked
   unsub: null,
   ac: null, // AbortController for the current view's listeners
 };
@@ -92,7 +95,7 @@ function myScore() {
 }
 
 function shareUrl() {
-  const u = new URL(location.origin + location.pathname);
+  const u = new URL(native.isNative ? native.PUBLIC_URL : location.origin + location.pathname);
   if (S.profile) u.searchParams.set("vs", S.profile.username);
   return u.toString();
 }
@@ -106,6 +109,7 @@ function toast(msg) {
 }
 
 async function shareOrCopy(text) {
+  if (await native.shareText(text)) return;
   if (navigator.share && matchMedia("(pointer: coarse)").matches) {
     try {
       await navigator.share({ text });
@@ -221,7 +225,7 @@ function renderPlay(signal) {
     start = performance.now();
     pad.classList.add("holding");
     hint.textContent = "Counting in your head…";
-    navigator.vibrate?.(8);
+    native.haptic("press");
   };
 
   const up = () => {
@@ -234,6 +238,7 @@ function renderPlay(signal) {
       return;
     }
     state = "revealed";
+    native.haptic("release");
     reveal(roundMs(secs));
   };
 
@@ -309,6 +314,8 @@ async function finishGame() {
   data.stats = updateStats(data.stats, S.day, totalScore(S.targets, S.actuals));
   save(data);
   track("finish");
+  native.haptic("success");
+  native.scheduleReminders(S.day);
   if (vs && vs !== S.profile?.username) track("vs_finish");
   S.view = "done";
   render();
@@ -363,6 +370,7 @@ function renderDone(signal) {
     <div class="actions">
       <button class="btn primary" id="share">Share result</button>
       <button class="btn" id="challenge">⚔️ Challenge a friend</button>
+      <button class="btn wide-col" id="story">📸 Story image</button>
     </div>
     ${claim}
     <section id="social"></section>
@@ -393,6 +401,39 @@ function renderDone(signal) {
     { signal },
   );
 
+  $("#story").addEventListener(
+    "click",
+    async () => {
+      track("share");
+      const blob = await storyImage({
+        day: S.day,
+        targets: S.targets,
+        actuals: S.actuals,
+        total,
+        title: title(total),
+        username: S.profile?.username,
+        url: shareUrl(),
+      });
+      const file = new File([blob], `innerclock-${S.day}.png`, { type: "image/png" });
+      if (await native.shareImage(blob, file.name)) return;
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file] });
+          return;
+        } catch (e) {
+          if (e.name === "AbortError") return;
+        }
+      }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = file.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast("Image saved — post it to your story");
+    },
+    { signal },
+  );
+
   $("#claim")?.addEventListener(
     "submit",
     async (e) => {
@@ -411,7 +452,12 @@ function renderDone(signal) {
         loadSocial();
       } catch (ex) {
         err.hidden = false;
-        err.textContent = ex.code === "taken" ? "That one’s taken — try another." : "Something went wrong. Try again.";
+        err.textContent =
+          ex.code === "taken"
+            ? "That one’s taken — try another."
+            : ex.code === "not-allowed"
+              ? "That username isn’t allowed — try another."
+              : "Something went wrong. Try again.";
       }
     },
     { signal },
@@ -522,12 +568,14 @@ async function refreshBoard() {
 
 async function loadSocial() {
   if (!S.online || !S.profile) return;
-  const [vsResult, following] = await Promise.all([
+  const [vsResult, following, blocked] = await Promise.all([
     vs && vs !== S.profile.username ? api.resultOf(vs, S.day).catch(() => null) : null,
     api.following(S.user.id).catch(() => []),
+    api.blockedIds(S.user.id).catch(() => []),
   ]);
   S.vsResult = vsResult;
   S.following = following;
+  S.blocked = blocked;
   await refreshBoard();
   S.unsub ??= api.subscribeDay(S.day, refreshBoard);
 }
@@ -576,9 +624,16 @@ async function openProfile(username) {
              <button class="btn wide" id="invite">Copy my challenge link</button>
              <details class="save"><summary>Keep this account on other devices</summary>
                <form class="row" id="email"><input type="email" placeholder="you@example.com" required/>
-               <button class="btn">Send link</button></form></details>`
+               <button class="btn">Send link</button></form></details>
+             <button class="btn wide danger" id="delete-account">Delete my account</button>
+             <p class="muted center small"><a href="${native.PUBLIC_URL}privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>`
           : S.profile
-            ? `<button class="btn ${follows ? "" : "primary"} wide" id="follow">${follows ? "Following ✓" : "Follow"}</button>`
+            ? S.blocked.includes(stats.user_id)
+              ? `<p class="muted center">You blocked @${esc(stats.username)}. They’re hidden from your leaderboards.</p>
+                 <button class="btn wide" id="unblock">Unblock</button>`
+              : `<button class="btn ${follows ? "" : "primary"} wide" id="follow">${follows ? "Following ✓" : "Follow"}</button>
+                 <div class="actions mod"><button class="btn small" id="block">Block</button>
+                 <button class="btn small" id="report">Report</button></div>`
             : ""
       }`;
 
@@ -593,6 +648,34 @@ async function openProfile(username) {
       }
       draw();
       refreshBoard();
+    });
+    $("#block", body)?.addEventListener("click", async () => {
+      if (!confirm(`Block @${stats.username}? You won’t see them on your leaderboards.`)) return;
+      try {
+        await api.block(stats.user_id);
+        S.blocked.push(stats.user_id);
+        S.following = S.following.filter((f) => f.id !== stats.user_id);
+        draw();
+        refreshBoard();
+      } catch {
+        toast("Couldn’t block");
+      }
+    });
+    $("#unblock", body)?.addEventListener("click", async () => {
+      await api.unblock(stats.user_id).catch(() => {});
+      S.blocked = S.blocked.filter((id) => id !== stats.user_id);
+      draw();
+      refreshBoard();
+    });
+    $("#report", body)?.addEventListener("click", async () => {
+      const reason = prompt(`Why are you reporting @${stats.username}? (e.g. offensive username)`, "Offensive username");
+      if (reason == null) return;
+      try {
+        await api.report(stats.user_id, reason.slice(0, 200) || "other");
+        toast("Thanks — we’ll review it");
+      } catch {
+        toast("Couldn’t send report");
+      }
     });
     $("#add-friend", body)?.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -615,6 +698,20 @@ async function openProfile(username) {
       }),
     );
     $("#invite", body)?.addEventListener("click", () => shareOrCopy(`Beat my inner clock ⏱️ ${shareUrl()}`));
+    $("#delete-account", body)?.addEventListener("click", async () => {
+      if (!confirm("Delete your account, scores, friends and reactions forever? This can’t be undone.")) return;
+      try {
+        await api.deleteAccount();
+        try {
+          localStorage.removeItem(STORE);
+        } catch {
+          /* ignore */
+        }
+        location.reload();
+      } catch {
+        toast("Couldn’t delete — try again");
+      }
+    });
     $("#email", body)?.addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
@@ -659,7 +756,10 @@ async function boot() {
   const mine = load().days?.[S.day]?.actuals ?? [];
   S.actuals = mine.slice(0, ROUNDS);
   S.round = S.actuals.length;
-  if (S.actuals.length === ROUNDS) S.view = "done";
+  if (S.actuals.length === ROUNDS) {
+    S.view = "done";
+    native.cancelReminder(S.day);
+  }
   render();
 
   if (!S.online) return;
