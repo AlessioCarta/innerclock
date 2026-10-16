@@ -1,4 +1,4 @@
-// Renders the iOS app icon (1024², opaque — Apple rejects alpha) and splash screens.
+// Renders the iOS app icon (1024², opaque — Apple rejects alpha), splash screens and PWA icons.
 // Run with `npm run app-icons` after changing the logo.
 import { writeFile, rename, unlink } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -42,4 +42,10 @@ const s = png(splash);
 for (const f of ["splash-2732x2732.png", "splash-2732x2732-1.png", "splash-2732x2732-2.png"]) {
   await writeFile(new URL(`Splash.imageset/${f}`, assets), s);
 }
-console.log("iOS icon + splash written");
+// PWA icons: iOS "Add to Home Screen" and Android install need PNGs.
+const pub = new URL("../public/", import.meta.url);
+for (const [name, size] of [["apple-touch-icon.png", 180], ["icon-192.png", 192], ["icon-512.png", 512]]) {
+  const r = new Resvg(icon, { background: "#0b0a12", fitTo: { mode: "width", value: size } });
+  await writeFile(new URL(name, pub), r.render().asPng());
+}
+console.log("iOS icon + splash + PWA icons written");

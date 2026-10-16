@@ -409,6 +409,19 @@ kbd {
 .actions .wide-col {
   grid-column: 1 / -1;
 }
+.install {
+  text-align: left;
+}
+.install p {
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+.ios-share {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 5px;
+}
 .claim {
   text-align: left;
   border-color: var(--accent);

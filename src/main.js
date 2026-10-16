@@ -132,6 +132,35 @@ function freshListeners() {
   return S.ac.signal;
 }
 
+// ---------- install as an app (PWA) ----------
+
+let installPrompt = null; // Android/desktop Chrome: deferred native install prompt
+const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !native.isNative;
+
+addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (S.view !== "play") render();
+});
+addEventListener("appinstalled", () => {
+  installPrompt = null;
+  toast("Installed — find InnerClock on your home screen");
+});
+
+function installCard() {
+  if (native.isNative || standalone) return "";
+  if (installPrompt)
+    return `<div class="card install"><b>📲 Get the app — free</b>
+      <p class="muted">Play every day from your home screen, even offline.</p>
+      <button class="btn primary wide" id="install">Install InnerClock</button></div>`;
+  if (isIOS)
+    return `<div class="card install"><b>📲 Get the app — free</b>
+      <p class="muted">In Safari tap <b>Share</b> <span class="ios-share" aria-hidden="true">⎙</span>
+      then <b>Add to Home Screen</b>. It opens full screen, like an app.</p></div>`;
+  return "";
+}
+
 // ---------- views ----------
 
 function header() {
@@ -163,6 +192,13 @@ function render() {
     (e) => {
       const p = e.target.closest("[data-profile]");
       if (p) openProfile(p.dataset.profile);
+      if (e.target.closest("#install") && installPrompt) {
+        installPrompt.prompt();
+        installPrompt.userChoice.finally(() => {
+          installPrompt = null;
+          render();
+        });
+      }
     },
     { signal },
   );
@@ -184,6 +220,7 @@ function renderHome(signal) {
       <li><span>🎯</span><div><b>Score up to 500</b><p>${TIERS.map((t) => `${t.emoji}&nbsp;${t.label}`).join(" · ")}</p></div></li>
       <li><span>🏆</span><div><b>Beat your friends</b><p>Live leaderboard unlocks after you play. No spoilers.</p></div></li>
     </ul>
+    ${installCard()}
   </main>`;
   $("#play").addEventListener(
     "click",
@@ -374,6 +411,7 @@ function renderDone(signal) {
     </div>
     ${claim}
     <section id="social"></section>
+    ${installCard()}
     <details class="card">
       <summary>Round by round</summary>
       <ol class="rounds"><li class="head"><span></span><span>Target</span><span>You</span><span>Off</span><span>Pts</span></li>${rows}</ol>
@@ -793,6 +831,10 @@ async function boot() {
   S.vsStats = vsStats;
   if (S.view !== "play") render();
   if (S.view === "done") loadSocial();
+}
+
+if ("serviceWorker" in navigator && !native.isNative && import.meta.env.PROD) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 
 boot();
