@@ -69,6 +69,17 @@ function saveDay() {
   save(data);
 }
 
+/** Count an event at most once per device per day, once we're signed in. */
+function track(kind) {
+  if (!S.online || !S.user) return;
+  const data = load();
+  const seen = data.tracked?.[S.day] ?? [];
+  if (seen.includes(kind)) return;
+  data.tracked = { [S.day]: [...seen, kind] }; // keep only today
+  save(data);
+  api.logEvent(S.day, kind);
+}
+
 // ---------- helpers ----------
 
 const esc = (s) =>
@@ -174,6 +185,7 @@ function renderHome(signal) {
     "click",
     () => {
       S.view = "play";
+      track("play");
       S.round = S.actuals.length;
       render();
     },
@@ -296,6 +308,8 @@ async function finishGame() {
   const data = load();
   data.stats = updateStats(data.stats, S.day, totalScore(S.targets, S.actuals));
   save(data);
+  track("finish");
+  if (vs && vs !== S.profile?.username) track("vs_finish");
   S.view = "done";
   render();
   if (S.online && S.profile) {
@@ -362,15 +376,20 @@ function renderDone(signal) {
 
   $("#share").addEventListener(
     "click",
-    () => shareOrCopy(shareText({ day: S.day, targets: S.targets, actuals: S.actuals, url: shareUrl() })),
+    () => {
+      track("share");
+      shareOrCopy(shareText({ day: S.day, targets: S.targets, actuals: S.actuals, url: shareUrl() }));
+    },
     { signal },
   );
   $("#challenge").addEventListener(
     "click",
-    () =>
+    () => {
+      track("challenge");
       shareOrCopy(
         `I scored ${total}/500 on today’s InnerClock ⏱️ ${emojiGrid(S.targets, S.actuals)}\nThink your inner clock is better? ${shareUrl()}`,
-      ),
+      );
+    },
     { signal },
   );
 
@@ -669,6 +688,8 @@ async function boot() {
     vs && vs !== S.profile?.username ? api.profileStats(vs).catch(() => null) : null,
   ]);
   S.players = players;
+  track("visit");
+  if (vs && vs !== S.profile?.username) track("vs_visit");
   S.vsStats = vsStats;
   if (S.view !== "play") render();
   if (S.view === "done") loadSocial();

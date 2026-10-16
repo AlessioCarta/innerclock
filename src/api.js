@@ -150,6 +150,15 @@ export function subscribeDay(day, onChange) {
   };
 }
 
+/** Anonymous analytics counter (no user id stored). Never throws. */
+export async function logEvent(day, kind) {
+  try {
+    await sb.from("events").insert({ day, kind });
+  } catch {
+    /* analytics must never break the game */
+  }
+}
+
 /** Upgrade an anonymous account so it survives across devices (magic link). */
 export async function linkEmail(email) {
   check(await sb.auth.updateUser({ email }));

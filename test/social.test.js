@@ -43,6 +43,7 @@ before(async () => {
   `);
   await db.exec(await migration("20261016000001_game_functions.sql"));
   await db.exec(await migration("20261016000002_social.sql"));
+  await db.exec(await migration("20261016000003_analytics.sql"));
   await db.exec(`insert into auth.users values ('${A}'), ('${B}');`);
   today = (await q("select public.ic_utc_day() d"))[0].d;
   await as(A, () => q("insert into profiles (id, username) values ($1, 'alice')", [A]));
@@ -149,6 +150,29 @@ test("results are immutable and usernames can't be changed", async () => {
   await assert.rejects(as(A, () => q("update profiles set username = 'bob2' where id = $1", [A])), /permission denied/);
   const [{ score }] = await q("select score from results where user_id = $1", [A]);
   assert.equal(score, 500);
+});
+
+test("analytics: players can log events but never read them", async () => {
+  for (const kind of ["visit", "visit", "finish", "share"]) {
+    await as(A, () => q("insert into events (day, kind) values ($1, $2)", [today, kind]));
+  }
+  await assert.rejects(as(A, () => q("select * from events")), /permission denied/);
+  await assert.rejects(as(A, () => q("select * from stats_daily")), /permission denied/);
+  await assert.rejects(as(A, () => q("delete from events")), /permission denied/);
+  await assert.rejects(as(A, () => q("insert into events (day, kind) values ($1, 'hack')", [today])), /check/);
+  await assert.rejects(as(A, () => q("insert into events (day, kind) values ($1, 'visit')", [today + 9])), /row-level security/);
+  await db.exec("set role anon;");
+  await assert.rejects(q("insert into events (day, kind) values (1, 'visit')"), /permission denied/);
+  await db.exec("reset role;");
+
+  // Owner (dashboard) view.
+  const [row] = await q("select visitors, finished, shared, finish_rate_pct, share_rate_pct from stats_daily where day = $1", [today]);
+  assert.deepEqual(
+    [row.visitors, row.finished, row.shared, Number(row.finish_rate_pct), Number(row.share_rate_pct)].map(Number),
+    [2, 1, 1, 50, 100],
+  );
+  const [ret] = await q("select new_players, returned_next_day from stats_retention where cohort_day = $1", [today]);
+  assert.deepEqual([Number(ret.new_players), Number(ret.returned_next_day)], [2, 0]);
 });
 
 test("cannot follow or react as someone else", async () => {
